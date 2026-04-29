@@ -1,0 +1,23 @@
+services:
+  postgres:
+    container_name: postgres
+    image: postgres:18.3-alpine
+    ports:
+      - 5432:5432
+
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "0909"
+      POSTGRES_DB: postgres
+
+    volumes:
+      - pg-booking-data:/var/lib/postgresql
+
+    networks:
+      - booking-network
+
+volumes:
+  pg-booking-data:
+
+networks:
+  booking-network:
