@@ -42,8 +42,7 @@ jobs:
 
       - name: Build and publish Maven module
         working-directory: ${{ inputs.working-directory }}
-
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          run: |
-            mvn -B -pl ${{ inputs.module }} -am deploy -DskipTests
+        run: |
+          mvn -B -pl ${{ inputs.module }} -am deploy -DskipTests
