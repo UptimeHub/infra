@@ -58,10 +58,15 @@ jobs:
 
       - name: Set image tags
         id: meta
+        shell: bash
         run: |
-          IMAGE_NAME="ghcr.io/${{ github.repository_owner }}/${{ inputs.image-name }}"
+          OWNER_LOWER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_INPUT_LOWER=$(echo "${{ inputs.image-name }}" | tr '[:upper:]' '[:lower:]')
+          REF_NAME_SAFE=$(echo "${GITHUB_REF_NAME}" | tr '[:upper:]' '[:lower:]' | sed 's#[^a-z0-9._-]#-#g')
+          
+          IMAGE_NAME="ghcr.io/${OWNER_LOWER}/${IMAGE_INPUT_LOWER}"
           SHA_TAG="${IMAGE_NAME}:${{ github.sha }}"
-          BRANCH_TAG="${IMAGE_NAME}:${GITHUB_REF_NAME//\//-}"
+          BRANCH_TAG="${IMAGE_NAME}:${REF_NAME_SAFE}"
           
           echo "image_name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
           echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
