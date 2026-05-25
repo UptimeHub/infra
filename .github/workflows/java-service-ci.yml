@@ -45,6 +45,9 @@ jobs:
   build-test-and-publish-image:
     name: Build, Test and Publish Image
     runs-on: ubuntu-latest
+    env:
+      MAVEN_PACKAGES_USERNAME: ${{ github.actor }}
+      MAVEN_PACKAGES_TOKEN: ${{ secrets['maven-packages-token'] || secrets.MAVEN_PACKAGES_TOKEN || github.token }}
 
     steps:
       - name: Checkout repository
@@ -59,9 +62,21 @@ jobs:
          server-id: github
          server-username: MAVEN_PACKAGES_USERNAME
          server-password: MAVEN_PACKAGES_TOKEN
-        env:
-          MAVEN_PACKAGES_USERNAME: ${{ github.actor }}
-          MAVEN_PACKAGES_TOKEN: ${{ secrets['maven-packages-token'] || secrets.MAVEN_PACKAGES_TOKEN || github.token }}
+
+      - name: Debug Maven package authentication
+        shell: bash
+        run: |
+          echo "Repository: $GITHUB_REPOSITORY"
+          echo "Actor: $GITHUB_ACTOR"
+          echo "Maven settings exists: $(test -f "$HOME/.m2/settings.xml" && echo yes || echo no)"
+          echo "Maven package username is set: $(test -n "$MAVEN_PACKAGES_USERNAME" && echo yes || echo no)"
+          echo "Maven package token is set: $(test -n "$MAVEN_PACKAGES_TOKEN" && echo yes || echo no)"
+          echo "Configured Maven server ids:"
+          grep -o '<id>[^<]*</id>' "$HOME/.m2/settings.xml" || true
+          echo "GitHub Packages auth check for core-api POM:"
+          curl --silent --output /dev/null --write-out "HTTP %{http_code}\n" \
+            --user "$MAVEN_PACKAGES_USERNAME:$MAVEN_PACKAGES_TOKEN" \
+            "https://maven.pkg.github.com/UptimeHub/core/uz/uptimehub/core-api/0.0.6/core-api-0.0.6.pom"
 
       - name: Build and Test with Maven
         working-directory: ${{ inputs.working-directory }}
