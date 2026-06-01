@@ -51,6 +51,16 @@ on:
         required: false
         type: string
         default: '-p 80:8080'
+
+      deploy-healthcheck-url:
+        required: false
+        type: string
+        default: ''
+
+      deploy-healthcheck-timeout-seconds:
+        required: false
+        type: number
+        default: 60
 permissions:
   contents: read
   packages: write
@@ -167,6 +177,8 @@ jobs:
           DEPLOY_CONTAINER_NAME: ${{ inputs.deploy-container-name || inputs.image-name }}
           DEPLOY_IMAGE_NAME: ${{ inputs.deploy-image-name || steps.meta.outputs.image_name }}
           DEPLOY_RUN_OPTIONS: ${{ inputs.deploy-run-options }}
+          DEPLOY_HEALTHCHECK_URL: ${{ inputs.deploy-healthcheck-url }}
+          DEPLOY_HEALTHCHECK_TIMEOUT_SECONDS: ${{ inputs.deploy-healthcheck-timeout-seconds }}
           SSH_HOST: ${{ vars.SSH_HOST }}
           SSH_PORT: ${{ vars.SSH_PORT }}
           SSH_USER: ${{ vars.SSH_USER }}
@@ -178,6 +190,8 @@ jobs:
             printf 'DEPLOY_CONTAINER_NAME=%q\n' "$DEPLOY_CONTAINER_NAME"
             printf 'DEPLOY_IMAGE_NAME=%q\n' "$DEPLOY_IMAGE_NAME"
             printf 'DEPLOY_RUN_OPTIONS=%q\n' "$DEPLOY_RUN_OPTIONS"
+            printf 'DEPLOY_HEALTHCHECK_URL=%q\n' "$DEPLOY_HEALTHCHECK_URL"
+            printf 'DEPLOY_HEALTHCHECK_TIMEOUT_SECONDS=%q\n' "$DEPLOY_HEALTHCHECK_TIMEOUT_SECONDS"
             cat << 'EOF'
 
             docker pull "$SHA_TAG"
@@ -185,5 +199,54 @@ jobs:
             docker stop "$DEPLOY_CONTAINER_NAME" || true
             docker rm "$DEPLOY_CONTAINER_NAME" || true
             docker run -d --name "$DEPLOY_CONTAINER_NAME" $DEPLOY_RUN_OPTIONS "$DEPLOY_IMAGE_NAME:latest"
+
+            deadline=$((SECONDS + DEPLOY_HEALTHCHECK_TIMEOUT_SECONDS))
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              if [ "$(docker inspect -f '{{.State.Running}}' "$DEPLOY_CONTAINER_NAME" 2>/dev/null)" = "true" ]; then
+                break
+              fi
+              sleep 2
+            done
+
+            if [ "$(docker inspect -f '{{.State.Running}}' "$DEPLOY_CONTAINER_NAME" 2>/dev/null)" != "true" ]; then
+              docker logs --tail 100 "$DEPLOY_CONTAINER_NAME" || true
+              exit 1
+            fi
+
+            docker_health_status="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{end}}' "$DEPLOY_CONTAINER_NAME" 2>/dev/null)"
+            if [ -n "$docker_health_status" ]; then
+              deadline=$((SECONDS + DEPLOY_HEALTHCHECK_TIMEOUT_SECONDS))
+              while [ "$SECONDS" -lt "$deadline" ]; do
+                docker_health_status="$(docker inspect -f '{{.State.Health.Status}}' "$DEPLOY_CONTAINER_NAME" 2>/dev/null)"
+                if [ "$docker_health_status" = "healthy" ]; then
+                  break
+                fi
+                if [ "$docker_health_status" = "unhealthy" ]; then
+                  docker logs --tail 100 "$DEPLOY_CONTAINER_NAME" || true
+                  exit 1
+                fi
+                sleep 2
+              done
+
+              if [ "$docker_health_status" != "healthy" ]; then
+                docker logs --tail 100 "$DEPLOY_CONTAINER_NAME" || true
+                exit 1
+              fi
+            fi
+
+            if [ -n "$DEPLOY_HEALTHCHECK_URL" ]; then
+              deadline=$((SECONDS + DEPLOY_HEALTHCHECK_TIMEOUT_SECONDS))
+              while [ "$SECONDS" -lt "$deadline" ]; do
+                if curl --fail --silent --show-error --output /dev/null "$DEPLOY_HEALTHCHECK_URL"; then
+                  exit 0
+                fi
+                sleep 2
+              done
+
+              docker logs --tail 100 "$DEPLOY_CONTAINER_NAME" || true
+              exit 1
+            fi
+
+            exit 0
           EOF
           } | ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" bash -s
