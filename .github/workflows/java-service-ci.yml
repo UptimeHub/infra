@@ -31,12 +31,26 @@ on:
         required: false
         type: boolean
         default: true
-    secrets:
-      maven-packages-token:
-        required: false
-      MAVEN_PACKAGES_TOKEN:
-        required: false
 
+      deploy:
+        required: false
+        type: boolean
+        default: true
+
+      deploy-container-name:
+        required: false
+        type: string
+        default: ''
+
+      deploy-image-name:
+        required: false
+        type: string
+        default: ''
+
+      deploy-run-options:
+        required: false
+        type: string
+        default: '-p 80:8080'
 permissions:
   contents: read
   packages: write
@@ -47,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MAVEN_PACKAGES_USERNAME: ${{ github.actor }}
-      MAVEN_PACKAGES_TOKEN: ${{ secrets['maven-packages-token'] || secrets.MAVEN_PACKAGES_TOKEN || github.token }}
+      MAVEN_PACKAGES_TOKEN: ${{ secrets.MAVEN_PACKAGES_TOKEN || github.token }}
 
     steps:
       - name: Checkout repository
@@ -131,3 +145,45 @@ jobs:
           echo "${{ steps.meta.outputs.sha_tag }}"
           echo "${{ steps.meta.outputs.branch_tag }}"
           echo "${{ steps.meta.outputs.latest_tag }}"
+
+      - name: Configure SSH
+        if: ${{ inputs.publish-image && inputs.deploy }}
+        env:
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_PORT: ${{ vars.SSH_PORT }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_PRIVATE_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          
+          ssh-keyscan -p "$SSH_PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+
+      - name: Deploy to server
+        if: ${{ inputs.publish-image && inputs.deploy }}
+        env:
+          SHA_TAG: ${{ steps.meta.outputs.sha_tag }}
+          DEPLOY_CONTAINER_NAME: ${{ inputs.deploy-container-name || inputs.image-name }}
+          DEPLOY_IMAGE_NAME: ${{ inputs.deploy-image-name || steps.meta.outputs.image_name }}
+          DEPLOY_RUN_OPTIONS: ${{ inputs.deploy-run-options }}
+          SSH_HOST: ${{ vars.SSH_HOST }}
+          SSH_PORT: ${{ vars.SSH_PORT }}
+          SSH_USER: ${{ vars.SSH_USER }}
+        shell: bash
+        run: |
+          {
+            printf 'set -euo pipefail\n'
+            printf 'SHA_TAG=%q\n' "$SHA_TAG"
+            printf 'DEPLOY_CONTAINER_NAME=%q\n' "$DEPLOY_CONTAINER_NAME"
+            printf 'DEPLOY_IMAGE_NAME=%q\n' "$DEPLOY_IMAGE_NAME"
+            printf 'DEPLOY_RUN_OPTIONS=%q\n' "$DEPLOY_RUN_OPTIONS"
+            cat << 'EOF'
+
+            docker pull "$SHA_TAG"
+            docker tag "$SHA_TAG" "$DEPLOY_IMAGE_NAME:latest"
+            docker stop "$DEPLOY_CONTAINER_NAME" || true
+            docker rm "$DEPLOY_CONTAINER_NAME" || true
+            docker run -d --name "$DEPLOY_CONTAINER_NAME" $DEPLOY_RUN_OPTIONS "$DEPLOY_IMAGE_NAME:latest"
+          EOF
+          } | ssh -i ~/.ssh/deploy_key -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" bash -s
