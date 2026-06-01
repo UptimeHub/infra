@@ -6,9 +6,9 @@ services:
       - 5432:5432
 
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: "0909"
-      POSTGRES_DB: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
 
     volumes:
       - pg-booking-data:/var/lib/postgresql
